@@ -1,0 +1,5 @@
+PySide6>=6.6
+google-auth>=2.29
+google-auth-oauthlib>=1.2
+google-api-python-client>=2.126
+python-certifi-win32; sys_platform == "win32"
