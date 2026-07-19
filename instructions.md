@@ -1,447 +1,220 @@
 # EMAIL_CAMPAIGN_MVP.md
 
-# Objective
+## Objective
 
 Build a Mail Merge style Email Campaign feature using the authenticated Gmail account.
 
-This is an MVP.
-
-Keep the implementation simple, clean and production-ready.
+This is an MVP. Keep the implementation simple, clean, and production-ready.
 
 ---
 
-# User Flow
+## User Flow
 
-Create Campaign
-
-↓
-
-Upload CSV
-
-↓
-
-Detect Email Column
-
-↓
-
-Generate Variables
-
-↓
-
-Write Subject
-
-↓
-
-Write Body
-
-↓
-
-Attach Files
-
-↓
-
-Preview
-
-↓
-
-Validate
-
-↓
-
-Send
-
-↓
-
-Show Progress
-
-↓
-
-Generate Logs
+Create Campaign → Upload CSV → Detect Email Column → Generate Variables → Write Subject → Write Body → Attach Files → Preview → Validate → Send → Show Progress → Generate Logs
 
 ---
 
-# Campaign Dashboard
+## Campaign Dashboard
 
-Display
+**Display**
 
-Campaign Name
+- Campaign Name
+- Created Time
+- Recipients
+- Sent
+- Failed
+- Status
 
-Created Time
+**Actions**
 
-Recipients
-
-Sent
-
-Failed
-
-Status
-
-Actions
-
-Create
-
-Open
-
-Delete
-
-View Logs
+- Create
+- Open
+- Delete
+- View Logs
 
 ---
 
-# CSV Upload
+## CSV Upload
 
-Support CSV only.
-
-Automatically detect the email column.
-
-Possible column names
-
-Email
-
-email
-
-Email Address
-
-Corporate Email
-
-Work Email
-
-Personal Email
-
-If multiple candidates exist,
-
-ask the user to choose.
+- Support CSV only.
+- Automatically detect the email column. Possible column names:
+  - Email
+  - email
+  - Email Address
+  - Corporate Email
+  - Work Email
+  - Personal Email
+- If multiple candidates exist, ask the user to choose.
 
 ---
 
-# Variables
+## Variables
 
 Every remaining column becomes a variable.
 
-Example
+Example CSV columns: `Name`, `Company`, `Designation`, `Email`
 
-CSV
+Resulting variables: `{{Name}}`, `{{Company}}`, `{{Designation}}`
 
-Name
-
-Company
-
-Designation
-
-Email
-
-Variables
-
-{{Name}}
-
-{{Company}}
-
-{{Designation}}
-
-Variables should be case insensitive.
-
-Unlimited variables.
+- Variables should be case insensitive.
+- Unlimited variables.
 
 ---
 
-# Email Composer
+## Email Composer
 
-Fields
+**Fields**
 
-Campaign Name
-
-Subject
-
-Body
+- Campaign Name
+- Subject
+- Body
 
 Allow inserting variables into both Subject and Body.
 
-Example
+Example:
 
-Subject
-
-Welcome {{Name}}
-
-Body
-
-Hi {{Name}}
-
-Thank you for joining {{Company}}.
+- Subject: `Welcome {{Name}}`
+- Body: `Hi {{Name}}, thank you for joining {{Company}}.`
 
 ---
 
-# Attachments
+## Attachments
 
-Support
+- Support multiple static attachments.
+- Every recipient receives the same files.
 
-Multiple static attachments.
+**Allow**
 
-Every recipient receives the same files.
+- Add Attachment
+- Remove Attachment
+- Preview Attachment Name
+- Display File Size
 
-Allow
+**Validate**
 
-Add Attachment
+- File exists
+- Readable
+- Within Gmail attachment limit
 
-Remove Attachment
-
-Preview Attachment Name
-
-Display File Size
-
-Validate
-
-File exists
-
-Readable
-
-Within Gmail attachment limit
-
-Supported
-
-PDF
-
-DOCX
-
-XLSX
-
-ZIP
-
-PNG
-
-JPEG
-
-TXT
-
-CSV
+**Supported formats:** PDF, DOCX, XLSX, ZIP, PNG, JPEG, TXT, CSV
 
 ---
 
-# Preview
+## Preview
 
-Select any recipient.
+- Select any recipient.
+- Render the final email exactly as it will be sent (Subject, Body, Attachments).
 
-Render the final email exactly as it will be sent.
+Example:
 
-Subject
-
-Welcome John
-
-Body
-
-Hi John
-
-Welcome to Google.
-
-Attachments
-
-Brochure.pdf
-
-Pricing.pdf
+- Subject: `Welcome John`
+- Body: `Hi John, welcome to Google.`
+- Attachments: `Brochure.pdf`, `Pricing.pdf`
 
 ---
 
-# Validation
+## Validation
 
-Before sending
+Before sending, check:
 
-Check
-
-Email format
-
-Duplicate emails
-
-Missing variables
-
-Missing attachments
-
-Blank subject
-
-Blank body
-
-Invalid CSV
+- Email format
+- Duplicate emails
+- Missing variables
+- Missing attachments
+- Blank subject
+- Blank body
+- Invalid CSV
 
 Stop sending if validation fails.
 
 ---
 
-# Sending
+## Sending
 
-When the user clicks Send
+When the user clicks Send, for every row:
 
-For every row
-
-Replace variables
-
-↓
-
-Prepare email
-
-↓
-
-Attach static files
-
-↓
-
-Call
-
-GmailService.send_email_with_attachments()
-
-↓
-
-Record result
-
-↓
-
-Continue
+Replace variables → Prepare email → Attach static files → Call `GmailService.send_email_with_attachments()` → Record result → Continue
 
 ---
 
-# Progress Screen
+## Progress Screen
 
-Display
+**Display**
 
-Progress Bar
+- Progress bar
+- Current recipient
+- Sent / Failed / Remaining counts
+- Current status
 
-Current Recipient
-
-Sent
-
-Failed
-
-Remaining
-
-Current Status
-
-Allow user to close the window while sending continues in the background.
+Allow the user to close the window while sending continues in the background.
 
 ---
 
-# Logs
+## Logs
 
-Store
-
-Campaign
-
-Recipient
-
-Timestamp
-
-Status
-
-Failure Reason
+Store: campaign, recipient, timestamp, status, failure reason.
 
 SQLite is sufficient.
 
 ---
 
-# Database
+## Database
 
-Tables
+**Tables:** `Campaign`, `Recipient`, `CampaignLog`
 
-Campaign
-
-Recipient
-
-CampaignLog
-
-Store
-
-Campaign metadata
-
-Recipient status
-
-Failure messages
-
-Created timestamp
+**Store:** campaign metadata, recipient status, failure messages, created timestamp.
 
 ---
 
-# Folder Structure
+## Folder Structure
 
+```
 campaign/
-
-campaign_manager.py
-
-campaign_sender.py
-
-csv_parser.py
-
-validators.py
-
-template_renderer.py
-
-database.py
-
-models.py
-
+    campaign_manager.py
+    campaign_sender.py
+    csv_parser.py
+    validators.py
+    template_renderer.py
+    database.py
+    models.py
 ui/
-
-CampaignPage.py
-
-CampaignEditor.py
-
-CampaignProgress.py
+    CampaignPage.py
+    CampaignEditor.py
+    CampaignProgress.py
+```
 
 ---
 
-# Out of Scope
+## Out of Scope
 
-The following MUST NOT be implemented.
+The following MUST NOT be implemented:
 
-AI generated emails
-
-Groq integration
-
-Scheduling
-
-Pause
-
-Resume
-
-Retry
-
-Campaign Templates
-
-Campaign Analytics
-
-Dynamic Attachments
-
-HTML Email Builder
-
-Open Tracking
-
-Click Tracking
-
-Reply Tracking
-
-Multiple Gmail Accounts
-
-Per-recipient Attachments
-
-Rate Limiting Dashboard
+- AI generated emails
+- Groq integration
+- Scheduling, Pause, Resume, Retry
+- Campaign Templates
+- Campaign Analytics
+- Dynamic Attachments
+- HTML Email Builder
+- Open Tracking, Click Tracking, Reply Tracking
+- Multiple Gmail Accounts
+- Per-recipient Attachments
+- Rate Limiting Dashboard
 
 ---
 
-# Acceptance Criteria
+## Acceptance Criteria
 
-The feature is complete when the user can
+The feature is complete when the user can:
 
-Upload a CSV
+- Upload a CSV
+- Automatically detect the email column
+- Use CSV fields as variables
+- Write subject and body
+- Attach one or more static files
+- Preview the final email
+- Send personalized emails through Gmail
+- View progress
+- View logs
 
-Automatically detect the email column
-
-Use CSV fields as variables
-
-Write subject and body
-
-Attach one or more static files
-
-Preview the final email
-
-Send personalized emails through Gmail
-
-View progress
-
-View logs
-
-All emails must be sent through GmailService without directly calling Gmail APIs from the campaign module.
+All emails must be sent through `GmailService` without directly calling Gmail APIs from the campaign module.
