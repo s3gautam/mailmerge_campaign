@@ -41,6 +41,7 @@ class CampaignEditor(QWidget):
 
         self.name_label = QLabel(f"Campaign: {campaign.name}")
         self.upload_button = QPushButton("Upload CSV")
+        self.csv_status_label = QLabel("No CSV uploaded")
         self.email_column_combo = QComboBox()
 
         self.subject_input = QLineEdit(campaign.subject)
@@ -69,6 +70,7 @@ class CampaignEditor(QWidget):
         for widget in (
             self.name_label,
             self.upload_button,
+            self.csv_status_label,
             self.email_column_combo,
             QLabel("Subject"),
             self.subject_input,
@@ -93,16 +95,20 @@ class CampaignEditor(QWidget):
         try:
             self._parsed_csv = parse_csv(file_path)
         except (FileNotFoundError, ValueError) as exc:
+            self.csv_status_label.setText("Upload failed")
             QMessageBox.critical(self, "Invalid CSV", str(exc))
             return
 
         if self._parsed_csv.email_column is None and self._parsed_csv.email_column_candidates:
+            self.csv_status_label.setText("Multiple possible email columns found — choose one below")
             self.email_column_combo.clear()
             self.email_column_combo.addItems(self._parsed_csv.email_column_candidates)
             self.email_column_combo.setVisible(True)
         elif self._parsed_csv.email_column is None:
+            self.csv_status_label.setText("Upload failed")
             QMessageBox.critical(self, "No email column", "No email column could be detected in this CSV.")
         else:
+            self.email_column_combo.setVisible(False)
             self._apply_recipients()
 
     def _on_email_column_chosen(self, column: str) -> None:
@@ -115,6 +121,11 @@ class CampaignEditor(QWidget):
         if self._parsed_csv is None or self.campaign.id is None:
             return
         self.manager.set_recipients(self.campaign.id, self._parsed_csv)
+        self.csv_status_label.setText(
+            f"Loaded {len(self._parsed_csv.rows)} recipients "
+            f"(email column: {self._parsed_csv.email_column}; "
+            f"variables: {', '.join(self._parsed_csv.variable_columns) or 'none'})"
+        )
 
     def _on_add_attachment(self) -> None:
         file_path, _ = QFileDialog.getOpenFileName(self, "Add Attachment")
