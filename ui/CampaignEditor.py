@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from PySide6.QtWidgets import (
     QComboBox,
+    QDialog,
     QFileDialog,
     QLabel,
     QLineEdit,
@@ -17,18 +20,23 @@ from PySide6.QtWidgets import (
 
 from campaign.campaign_manager import CampaignManager
 from campaign.csv_parser import ParsedCsv, parse_csv, resolve_email_column
-from campaign.models import Campaign
+from campaign.models import Campaign, CampaignStatus, Recipient
 from campaign.template_renderer import render_template
 from campaign.validators import validate_campaign
 
 
 class CampaignEditor(QWidget):
     def __init__(
-        self, manager: CampaignManager, campaign: Campaign, parent: QWidget | None = None
+        self,
+        manager: CampaignManager,
+        campaign: Campaign,
+        on_send: Callable[[Campaign, list[Recipient]], None],
+        parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self.manager = manager
         self.campaign = campaign
+        self.on_send = on_send
         self._parsed_csv: ParsedCsv | None = None
 
         self.name_label = QLabel(f"Campaign: {campaign.name}")
@@ -50,7 +58,9 @@ class CampaignEditor(QWidget):
         self.email_column_combo.currentTextChanged.connect(self._on_email_column_chosen)
         self.add_attachment_button.clicked.connect(self._on_add_attachment)
         self.remove_attachment_button.clicked.connect(self._on_remove_attachment)
+        self.preview_button.clicked.connect(self._on_preview)
         self.validate_button.clicked.connect(self._on_validate)
+        self.send_button.clicked.connect(self._on_send)
 
         for attachment in campaign.attachments:
             self.attachments_list.addItem(attachment)
@@ -129,15 +139,18 @@ class CampaignEditor(QWidget):
             return []
         return self._parsed_csv.rows
 
-    def _on_validate(self) -> None:
+    def _run_validation(self):
         self.manager.update_content(self.campaign, self.subject_input.text(), self.body_input.toPlainText())
-        result = validate_campaign(
+        return validate_campaign(
             subject=self.campaign.subject,
             body=self.campaign.body,
             attachments=self.campaign.attachments,
             recipients=self._current_recipients_as_dicts(),
             email_field=self._parsed_csv.email_column if self._parsed_csv else "email",
         )
+
+    def _on_validate(self) -> None:
+        result = self._run_validation()
         if result.is_valid:
             QMessageBox.information(self, "Validation passed", "Campaign is ready to send.")
         else:
@@ -147,3 +160,36 @@ class CampaignEditor(QWidget):
         subject = render_template(self.subject_input.text(), variables)
         body = render_template(self.body_input.toPlainText(), variables)
         return subject, body
+
+    def _on_preview(self) -> None:
+        recipients = self._current_recipients_as_dicts()
+        if not recipients or self._parsed_csv is None or self._parsed_csv.email_column is None:
+            QMessageBox.warning(self, "No recipients", "Upload a CSV before previewing.")
+            return
+
+        variables = {k: v for k, v in recipients[0].items() if k != self._parsed_csv.email_column}
+        subject, body = self.render_preview(variables)
+        attachments = "\n".join(self.campaign.attachments) or "(none)"
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle(f"Preview: {recipients[0][self._parsed_csv.email_column]}")
+        layout = QVBoxLayout(dialog)
+        layout.addWidget(QLabel(f"Subject: {subject}"))
+        layout.addWidget(QLabel("Body:"))
+        body_view = QTextEdit(body)
+        body_view.setReadOnly(True)
+        layout.addWidget(body_view)
+        layout.addWidget(QLabel(f"Attachments:\n{attachments}"))
+        dialog.exec()
+
+    def _on_send(self) -> None:
+        result = self._run_validation()
+        if not result.is_valid:
+            QMessageBox.warning(self, "Cannot send", "Fix validation errors first:\n" + "\n".join(result.errors))
+            return
+        if self.campaign.id is None:
+            return
+
+        recipients = self.manager.database.list_recipients(self.campaign.id)
+        self.manager.set_status(self.campaign, CampaignStatus.SENDING)
+        self.on_send(self.campaign, recipients)

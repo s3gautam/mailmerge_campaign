@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QHBoxLayout,
     QHeaderView,
+    QInputDialog,
     QMessageBox,
     QPushButton,
     QTableWidget,
@@ -21,9 +24,17 @@ COLUMNS = ["Campaign Name", "Created Time", "Recipients", "Sent", "Failed", "Sta
 
 
 class CampaignPage(QWidget):
-    def __init__(self, manager: CampaignManager, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        manager: CampaignManager,
+        on_open_campaign: Callable[[Campaign], None],
+        on_view_logs: Callable[[Campaign], None],
+        parent: QWidget | None = None,
+    ) -> None:
         super().__init__(parent)
         self.manager = manager
+        self.on_open_campaign = on_open_campaign
+        self.on_view_logs = on_view_logs
         self._campaigns: list[Campaign] = []
 
         self.table = QTableWidget(0, len(COLUMNS), self)
@@ -79,12 +90,19 @@ class CampaignPage(QWidget):
         return self._campaigns[row]
 
     def _on_create(self) -> None:
-        # Wiring to CampaignEditor happens at the application composition layer.
-        pass
+        name, ok = QInputDialog.getText(self, "Create Campaign", "Campaign name:")
+        if not ok or not name.strip():
+            return
+        campaign = self.manager.create_campaign(name.strip())
+        self.refresh()
+        self.on_open_campaign(campaign)
 
     def _on_open(self) -> None:
-        if self._selected_campaign() is None:
+        campaign = self._selected_campaign()
+        if campaign is None:
             QMessageBox.warning(self, "No selection", "Select a campaign to open.")
+            return
+        self.on_open_campaign(campaign)
 
     def _on_delete(self) -> None:
         campaign = self._selected_campaign()
@@ -99,5 +117,8 @@ class CampaignPage(QWidget):
             self.refresh()
 
     def _on_view_logs(self) -> None:
-        if self._selected_campaign() is None:
+        campaign = self._selected_campaign()
+        if campaign is None:
             QMessageBox.warning(self, "No selection", "Select a campaign to view logs.")
+            return
+        self.on_view_logs(campaign)
