@@ -12,7 +12,13 @@ from dataclasses import dataclass
 
 from campaign.database import Database
 from campaign.models import Campaign, CampaignLog, Recipient, RecipientStatus
-from campaign.template_renderer import render_body_html, render_template, strip_bold_markers
+from campaign.template_renderer import (
+    missing_variables,
+    render_body_html,
+    render_template,
+    strip_bold_markers,
+)
+from campaign.validators import is_valid_email
 from services.gmail_service import GmailService
 
 logger = logging.getLogger("campaign_sender")
@@ -45,11 +51,23 @@ class CampaignSender:
         on_progress: ProgressCallback | None = None,
     ) -> SendProgress:
         progress = SendProgress(total=len(recipients))
+        seen_emails: set[str] = set()
 
         for recipient in recipients:
             progress.current_email = recipient.email
             if on_progress:
                 on_progress(progress)
+
+            skip_reason = self._skip_reason(campaign, recipient, seen_emails)
+            if skip_reason is not None:
+                self._record(campaign, recipient, RecipientStatus.FAILED, skip_reason)
+                progress.failed += 1
+                logger.warning("Skipped %s: %s", recipient.email, skip_reason)
+                if on_progress:
+                    on_progress(progress)
+                continue
+
+            seen_emails.add(recipient.email.strip().lower())
 
             try:
                 subject = render_template(campaign.subject, recipient.variables)
@@ -73,6 +91,21 @@ class CampaignSender:
                 on_progress(progress)
 
         return progress
+
+    @staticmethod
+    def _skip_reason(campaign: Campaign, recipient: Recipient, seen_emails: set[str]) -> str | None:
+        email = recipient.email.strip()
+        if not is_valid_email(email):
+            return f"Invalid email format: {email or '(blank)'}"
+        if email.lower() in seen_emails:
+            return f"Duplicate email: {email}"
+        missing = {
+            *missing_variables(campaign.subject, recipient.variables),
+            *missing_variables(campaign.body, recipient.variables),
+        }
+        if missing:
+            return f"Missing variable(s): {', '.join(sorted(missing))}"
+        return None
 
     def _record(
         self,

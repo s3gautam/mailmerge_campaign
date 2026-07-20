@@ -22,7 +22,7 @@ from campaign.campaign_manager import CampaignManager
 from campaign.csv_parser import ParsedCsv, parse_csv, resolve_email_column
 from campaign.models import Campaign, CampaignStatus, Recipient
 from campaign.template_renderer import render_body_html, render_template
-from campaign.validators import validate_campaign
+from campaign.validators import partition_recipients, validate_campaign
 
 
 class CampaignEditor(QWidget):
@@ -162,10 +162,28 @@ class CampaignEditor(QWidget):
 
     def _on_validate(self) -> None:
         result = self._run_validation()
-        if result.is_valid:
-            QMessageBox.information(self, "Validation passed", "Campaign is ready to send.")
-        else:
+        if not result.is_valid:
             QMessageBox.warning(self, "Validation failed", "\n".join(result.errors))
+            return
+
+        _, skipped = partition_recipients(
+            subject=self.campaign.subject,
+            body=self.campaign.body,
+            recipients=self._current_recipients_as_dicts(),
+            email_field=self._parsed_csv.email_column if self._parsed_csv else "email",
+        )
+        if skipped:
+            details = "\n".join(f"- {s.row.get(self._email_field(), '(unknown)')}: {s.reason}" for s in skipped)
+            QMessageBox.information(
+                self,
+                "Validation passed",
+                f"Campaign is ready to send.\n\n{len(skipped)} recipient(s) will be skipped:\n{details}",
+            )
+        else:
+            QMessageBox.information(self, "Validation passed", "Campaign is ready to send.")
+
+    def _email_field(self) -> str:
+        return self._parsed_csv.email_column if self._parsed_csv else "email"
 
     def render_preview(self, variables: dict[str, str]) -> tuple[str, str]:
         subject = render_template(self.subject_input.text(), variables)
@@ -201,6 +219,23 @@ class CampaignEditor(QWidget):
             return
         if self.campaign.id is None:
             return
+
+        _, skipped = partition_recipients(
+            subject=self.campaign.subject,
+            body=self.campaign.body,
+            recipients=self._current_recipients_as_dicts(),
+            email_field=self._email_field(),
+        )
+        if skipped:
+            confirm = QMessageBox.question(
+                self,
+                "Some recipients will be skipped",
+                f"{len(skipped)} recipient(s) have an invalid email, are duplicates, "
+                "or are missing a variable, and will be skipped. Everyone else will "
+                "still be sent to. Continue?",
+            )
+            if confirm != QMessageBox.Yes:
+                return
 
         recipients = self.manager.database.list_recipients(self.campaign.id)
         self.manager.set_status(self.campaign, CampaignStatus.SENDING)

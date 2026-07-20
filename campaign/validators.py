@@ -65,8 +65,14 @@ def validate_campaign(
     recipients: list[dict[str, str]],
     email_field: str = "email",
 ) -> ValidationResult:
-    """Validate a campaign before sending. ``recipients`` is a list of dicts with
-    an ``email_field`` key plus arbitrary variable keys."""
+    """Validate campaign-wide requirements before sending.
+
+    These checks affect every recipient equally (a blank subject, a missing
+    attachment, an empty CSV) and stop the whole send when they fail.
+    Per-recipient problems (bad email format, duplicates, missing variables)
+    are handled separately by :func:`partition_recipients` — the send skips
+    just those rows instead of blocking everyone else.
+    """
     result = ValidationResult()
 
     if not subject.strip():
@@ -77,22 +83,54 @@ def validate_campaign(
     if not recipients:
         result.add("CSV has no recipients")
 
-    seen_emails: set[str] = set()
-    for row in recipients:
-        email = row.get(email_field, "").strip()
-        if not is_valid_email(email):
-            result.add(f"Invalid email format: {email or '(blank)'}")
-            continue
-        normalized = email.lower()
-        if normalized in seen_emails:
-            result.add(f"Duplicate email: {email}")
-        seen_emails.add(normalized)
-
-        variables = {k: v for k, v in row.items() if k != email_field}
-        for missing in {*missing_variables(subject, variables), *missing_variables(body, variables)}:
-            result.add(f"Missing variable '{{{{{missing}}}}}' for recipient {email}")
-
     for error in validate_attachments(attachments):
         result.add(error)
 
     return result
+
+
+@dataclass
+class SkippedRecipient:
+    row: dict[str, str]
+    reason: str
+
+
+def partition_recipients(
+    subject: str,
+    body: str,
+    recipients: list[dict[str, str]],
+    email_field: str = "email",
+) -> tuple[list[dict[str, str]], list[SkippedRecipient]]:
+    """Split recipients into those safe to send and those to skip.
+
+    A row is skipped (not blocking the rest of the send) when its email is
+    malformed, it's a duplicate of an earlier row, or it's missing a
+    variable referenced in the subject/body.
+    """
+    valid: list[dict[str, str]] = []
+    skipped: list[SkippedRecipient] = []
+    seen_emails: set[str] = set()
+
+    for row in recipients:
+        email = row.get(email_field, "").strip()
+        if not is_valid_email(email):
+            skipped.append(SkippedRecipient(row, f"Invalid email format: {email or '(blank)'}"))
+            continue
+
+        normalized = email.lower()
+        if normalized in seen_emails:
+            skipped.append(SkippedRecipient(row, f"Duplicate email: {email}"))
+            continue
+
+        variables = {k: v for k, v in row.items() if k != email_field}
+        missing = {*missing_variables(subject, variables), *missing_variables(body, variables)}
+        if missing:
+            skipped.append(
+                SkippedRecipient(row, f"Missing variable(s): {', '.join(sorted(missing))}")
+            )
+            continue
+
+        seen_emails.add(normalized)
+        valid.append(row)
+
+    return valid, skipped
