@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import html
 import re
 
 VARIABLE_PATTERN = re.compile(r"\{\{\s*([^{}]+?)\s*\}\}")
+BOLD_PATTERN = re.compile(r"\*\*(.+?)\*\*")
 
 
 def extract_variables(template: str) -> list[str]:
@@ -29,3 +31,15 @@ def missing_variables(template: str, variables: dict[str, str]) -> list[str]:
         for name in extract_variables(template)
         if name.lower() not in lookup
     ]
+
+
+def strip_bold_markers(body: str) -> str:
+    """Remove ``**`` markers for the plain-text fallback part of the email."""
+    return BOLD_PATTERN.sub(r"\1", body)
+
+
+def render_body_html(body: str) -> str:
+    """Convert a plain-text body with ``**bold**`` markers into safe HTML."""
+    escaped = html.escape(body)
+    bolded = BOLD_PATTERN.sub(r"<strong>\1</strong>", escaped)
+    return bolded.replace("\n", "<br>\n")

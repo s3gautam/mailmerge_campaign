@@ -12,7 +12,7 @@ from dataclasses import dataclass
 
 from campaign.database import Database
 from campaign.models import Campaign, CampaignLog, Recipient, RecipientStatus
-from campaign.template_renderer import render_template
+from campaign.template_renderer import render_body_html, render_template, strip_bold_markers
 from services.gmail_service import GmailService
 
 logger = logging.getLogger("campaign_sender")
@@ -57,7 +57,8 @@ class CampaignSender:
                 self.gmail_service.send_email_with_attachments(
                     to=recipient.email,
                     subject=subject,
-                    body=body,
+                    body=strip_bold_markers(body),
+                    body_html=render_body_html(body),
                     attachments=campaign.attachments,
                 )
             except Exception as exc:  # never let one recipient's failure kill the whole send loop

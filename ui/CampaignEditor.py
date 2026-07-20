@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (
 from campaign.campaign_manager import CampaignManager
 from campaign.csv_parser import ParsedCsv, parse_csv, resolve_email_column
 from campaign.models import Campaign, CampaignStatus, Recipient
-from campaign.template_renderer import render_template
+from campaign.template_renderer import render_body_html, render_template
 from campaign.validators import validate_campaign
 
 
@@ -74,7 +74,7 @@ class CampaignEditor(QWidget):
             self.email_column_combo,
             QLabel("Subject"),
             self.subject_input,
-            QLabel("Body"),
+            QLabel("Body (wrap text in ** ** for bold, e.g. **important**)"),
             self.body_input,
             QLabel("Attachments"),
             self.attachments_list,
@@ -187,8 +187,9 @@ class CampaignEditor(QWidget):
         layout = QVBoxLayout(dialog)
         layout.addWidget(QLabel(f"Subject: {subject}"))
         layout.addWidget(QLabel("Body:"))
-        body_view = QTextEdit(body)
+        body_view = QTextEdit()
         body_view.setReadOnly(True)
+        body_view.setHtml(render_body_html(body))
         layout.addWidget(body_view)
         layout.addWidget(QLabel(f"Attachments:\n{attachments}"))
         dialog.exec()

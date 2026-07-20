@@ -109,12 +109,25 @@ class GmailService:
         subject: str,
         body: str,
         attachments: list[str],
+        body_html: str | None = None,
     ) -> str:
-        """Send an email with zero or more file attachments. Returns the Gmail message id."""
+        """Send an email with zero or more file attachments. Returns the Gmail message id.
+
+        ``body`` is the plain-text fallback. If ``body_html`` is provided, the
+        message is sent as ``multipart/alternative`` so HTML-capable clients
+        render the rich version while others fall back to plain text.
+        """
         message = MIMEMultipart()
         message["to"] = _sanitize_header(to)
         message["subject"] = _sanitize_header(subject)
-        message.attach(MIMEText(body, "plain"))
+
+        if body_html is not None:
+            alternative = MIMEMultipart("alternative")
+            alternative.attach(MIMEText(body, "plain"))
+            alternative.attach(MIMEText(body_html, "html"))
+            message.attach(alternative)
+        else:
+            message.attach(MIMEText(body, "plain"))
 
         for attachment_path in attachments:
             path = Path(attachment_path)

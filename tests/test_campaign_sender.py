@@ -9,7 +9,7 @@ class FakeGmailService:
         self.fail_for = fail_for or set()
         self.sent: list[str] = []
 
-    def send_email_with_attachments(self, to, subject, body, attachments):
+    def send_email_with_attachments(self, to, subject, body, attachments, body_html=None):
         if to in self.fail_for:
             raise GmailServiceError("simulated failure")
         self.sent.append(to)
