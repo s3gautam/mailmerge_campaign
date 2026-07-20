@@ -4,14 +4,14 @@ from __future__ import annotations
 
 import sys
 
-from PySide6.QtWidgets import QApplication, QMainWindow, QMessageBox, QStackedWidget
+from PySide6.QtWidgets import QApplication, QMainWindow, QMessageBox, QStackedWidget, QToolBar
 
 from campaign.campaign_manager import CampaignManager
 from campaign.campaign_sender import CampaignSender
 from campaign.database import Database
 from campaign.logging_config import configure_logging
 from campaign.models import Campaign, CampaignStatus, Recipient
-from services.gmail_service import GmailService
+from services.gmail_service import GmailService, GmailServiceError
 from ui.CampaignEditor import CampaignEditor
 from ui.CampaignLogs import CampaignLogs
 from ui.CampaignPage import CampaignPage
@@ -29,6 +29,10 @@ class MainWindow(QMainWindow):
         self.manager = CampaignManager(self.database)
         self.gmail_service = GmailService()
         self.sender = CampaignSender(self.database, self.gmail_service)
+
+        toolbar = QToolBar("Gmail")
+        toolbar.addAction("Reauthenticate Gmail", self._on_reauthenticate)
+        self.addToolBar(toolbar)
 
         self.stack = QStackedWidget()
         self.setCentralWidget(self.stack)
@@ -87,6 +91,20 @@ class MainWindow(QMainWindow):
         self._active_worker = None
         QMessageBox.critical(self, "Campaign send failed", message)
         self.stack.setCurrentWidget(self.dashboard)
+
+    def _on_reauthenticate(self) -> None:
+        QMessageBox.information(
+            self,
+            "Reauthenticate Gmail",
+            "Your browser will open so you can sign in to Gmail. "
+            "Complete the sign-in there, then return to this window.",
+        )
+        try:
+            self.gmail_service.reauthenticate()
+        except GmailServiceError as exc:
+            QMessageBox.critical(self, "Reauthentication failed", str(exc))
+            return
+        QMessageBox.information(self, "Reauthenticate Gmail", "Gmail authentication succeeded.")
 
 
 def main() -> None:

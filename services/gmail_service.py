@@ -49,16 +49,21 @@ class GmailService:
             creds = Credentials.from_authorized_user_file(self.token_path, SCOPES)
 
         if not creds or not creds.valid:
+            if not os.path.exists(self.credentials_path):
+                raise GmailServiceError(
+                    f"Gmail credentials file not found at '{self.credentials_path}'. "
+                    "Download a Desktop-app OAuth client from Google Cloud Console."
+                )
             try:
                 if creds and creds.expired and creds.refresh_token:
                     creds.refresh(Request())
                 else:
                     flow = InstalledAppFlow.from_client_secrets_file(self.credentials_path, SCOPES)
                     creds = flow.run_local_server(port=0)
-            except (GoogleAuthError, OSError) as exc:
-                # A stale/revoked token leaves a bad refresh_token on disk; drop it so the
-                # next attempt falls through to a fresh interactive OAuth flow instead of
-                # failing the same way forever.
+            except Exception as exc:
+                # A stale/revoked token or malformed credentials file must not keep
+                # failing the same way forever; drop the token so the next attempt
+                # falls through to a fresh interactive OAuth flow.
                 if os.path.exists(self.token_path):
                     os.remove(self.token_path)
                 logger.error("Gmail authentication failed: %s", exc)
@@ -72,6 +77,17 @@ class GmailService:
         if self._service is None:
             self._service = build("gmail", "v1", credentials=self._get_credentials())
         return self._service
+
+    def reauthenticate(self) -> None:
+        """Discard any cached token and re-run the interactive OAuth flow.
+
+        Call this from the UI (e.g. a "Reauthenticate Gmail" button) when sending
+        fails due to an expired, revoked, or otherwise broken token.
+        """
+        if os.path.exists(self.token_path):
+            os.remove(self.token_path)
+        self._service = None
+        self._get_credentials()
 
     def send_email(self, to: str, subject: str, body: str) -> str:
         """Send a plain-text email. Returns the Gmail message id."""
