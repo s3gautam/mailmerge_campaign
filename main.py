@@ -65,6 +65,7 @@ class MainWindow(QMainWindow):
         worker = SendWorker(self.sender, campaign, recipients)
         worker.progress.connect(progress_screen.update_progress)
         worker.finished_sending.connect(lambda result: self._on_send_finished(campaign, result))
+        worker.failed.connect(lambda message: self._on_send_failed(campaign, message))
         self._active_worker = worker
         worker.start()
 
@@ -78,6 +79,13 @@ class MainWindow(QMainWindow):
             "Campaign finished",
             f"Sent: {result.sent}, Failed: {result.failed}",
         )
+        self.stack.setCurrentWidget(self.dashboard)
+
+    def _on_send_failed(self, campaign: Campaign, message: str) -> None:
+        self.manager.set_status(campaign, CampaignStatus.FAILED)
+        self.dashboard.refresh()
+        self._active_worker = None
+        QMessageBox.critical(self, "Campaign send failed", message)
         self.stack.setCurrentWidget(self.dashboard)
 
 

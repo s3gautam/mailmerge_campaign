@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from campaign.database import Database
 from campaign.models import Campaign, CampaignLog, Recipient, RecipientStatus
 from campaign.template_renderer import render_template
-from services.gmail_service import GmailService, GmailServiceError
+from services.gmail_service import GmailService
 
 logger = logging.getLogger("campaign_sender")
 
@@ -60,7 +60,7 @@ class CampaignSender:
                     body=body,
                     attachments=campaign.attachments,
                 )
-            except GmailServiceError as exc:
+            except Exception as exc:  # never let one recipient's failure kill the whole send loop
                 self._record(campaign, recipient, RecipientStatus.FAILED, str(exc))
                 progress.failed += 1
                 logger.warning("Failed to send to %s: %s", recipient.email, exc)

@@ -15,6 +15,7 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from pathlib import Path
 
+from google.auth.exceptions import GoogleAuthError
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -48,11 +49,20 @@ class GmailService:
             creds = Credentials.from_authorized_user_file(self.token_path, SCOPES)
 
         if not creds or not creds.valid:
-            if creds and creds.expired and creds.refresh_token:
-                creds.refresh(Request())
-            else:
-                flow = InstalledAppFlow.from_client_secrets_file(self.credentials_path, SCOPES)
-                creds = flow.run_local_server(port=0)
+            try:
+                if creds and creds.expired and creds.refresh_token:
+                    creds.refresh(Request())
+                else:
+                    flow = InstalledAppFlow.from_client_secrets_file(self.credentials_path, SCOPES)
+                    creds = flow.run_local_server(port=0)
+            except (GoogleAuthError, OSError) as exc:
+                # A stale/revoked token leaves a bad refresh_token on disk; drop it so the
+                # next attempt falls through to a fresh interactive OAuth flow instead of
+                # failing the same way forever.
+                if os.path.exists(self.token_path):
+                    os.remove(self.token_path)
+                logger.error("Gmail authentication failed: %s", exc)
+                raise GmailServiceError(f"Gmail authentication failed: {exc}") from exc
             with open(self.token_path, "w") as token_file:
                 token_file.write(creds.to_json())
 
@@ -99,7 +109,9 @@ class GmailService:
                 .send(userId="me", body={"raw": raw})
                 .execute()
             )
-        except HttpError as exc:
+        except GmailServiceError:
+            raise
+        except (HttpError, GoogleAuthError, OSError) as exc:
             logger.error("Gmail send failed for %s: %s", to, exc)
             raise GmailServiceError(str(exc)) from exc
 
