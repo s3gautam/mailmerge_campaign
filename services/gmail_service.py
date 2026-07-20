@@ -31,6 +31,16 @@ class GmailServiceError(Exception):
     """Raised when a Gmail send operation fails."""
 
 
+def _sanitize_header(value: str) -> str:
+    """Collapse embedded newlines so header values can't break RFC 5322 folding.
+
+    A variable containing a literal newline (e.g. pasted multi-line text) would
+    otherwise raise ``HeaderParseError: folded header contains newline`` deep
+    inside the email library when the message is serialized.
+    """
+    return " ".join(value.splitlines()).strip()
+
+
 class GmailService:
     """Thin, authenticated wrapper around the Gmail API."""
 
@@ -102,8 +112,8 @@ class GmailService:
     ) -> str:
         """Send an email with zero or more file attachments. Returns the Gmail message id."""
         message = MIMEMultipart()
-        message["to"] = to
-        message["subject"] = subject
+        message["to"] = _sanitize_header(to)
+        message["subject"] = _sanitize_header(subject)
         message.attach(MIMEText(body, "plain"))
 
         for attachment_path in attachments:
