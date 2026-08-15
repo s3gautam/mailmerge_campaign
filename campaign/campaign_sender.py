@@ -1,4 +1,4 @@
-"""Drives sending a validated campaign, one recipient at a time.
+"""Drives sending or drafting a validated campaign, one recipient at a time.
 
 All Gmail traffic goes through the injected GmailService instance — this
 module never calls the Gmail API directly.
@@ -50,6 +50,38 @@ class CampaignSender:
         recipients: list[Recipient],
         on_progress: ProgressCallback | None = None,
     ) -> SendProgress:
+        """Send real emails through Gmail."""
+        return self._process(
+            campaign,
+            recipients,
+            self.gmail_service.send_email_with_attachments,
+            RecipientStatus.SENT,
+            on_progress,
+        )
+
+    def create_drafts(
+        self,
+        campaign: Campaign,
+        recipients: list[Recipient],
+        on_progress: ProgressCallback | None = None,
+    ) -> SendProgress:
+        """Create a personalized Gmail draft per recipient instead of sending."""
+        return self._process(
+            campaign,
+            recipients,
+            self.gmail_service.create_draft_with_attachments,
+            RecipientStatus.DRAFTED,
+            on_progress,
+        )
+
+    def _process(
+        self,
+        campaign: Campaign,
+        recipients: list[Recipient],
+        gmail_action: Callable[..., str],
+        success_status: RecipientStatus,
+        on_progress: ProgressCallback | None,
+    ) -> SendProgress:
         progress = SendProgress(total=len(recipients))
         seen_emails: set[str] = set()
 
@@ -72,19 +104,19 @@ class CampaignSender:
             try:
                 subject = render_template(campaign.subject, recipient.variables)
                 body = render_template(campaign.body, recipient.variables)
-                self.gmail_service.send_email_with_attachments(
+                gmail_action(
                     to=recipient.email,
                     subject=subject,
                     body=strip_bold_markers(body),
                     body_html=render_body_html(body),
                     attachments=campaign.attachments,
                 )
-            except Exception as exc:  # never let one recipient's failure kill the whole send loop
+            except Exception as exc:  # never let one recipient's failure kill the whole loop
                 self._record(campaign, recipient, RecipientStatus.FAILED, str(exc))
                 progress.failed += 1
-                logger.warning("Failed to send to %s: %s", recipient.email, exc)
+                logger.warning("Failed for %s: %s", recipient.email, exc)
             else:
-                self._record(campaign, recipient, RecipientStatus.SENT, None)
+                self._record(campaign, recipient, success_status, None)
                 progress.sent += 1
 
             if on_progress:

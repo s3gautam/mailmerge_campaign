@@ -24,7 +24,10 @@ from googleapiclient.errors import HttpError
 
 logger = logging.getLogger("gmail_service")
 
-SCOPES = ["https://www.googleapis.com/auth/gmail.send"]
+# gmail.compose covers both sending and draft management (a superset of
+# gmail.send), so a single scope supports send_email_with_attachments() and
+# create_draft_with_attachments().
+SCOPES = ["https://www.googleapis.com/auth/gmail.compose"]
 
 
 class GmailServiceError(Exception):
@@ -99,22 +102,18 @@ class GmailService:
         self._service = None
         self._get_credentials()
 
-    def send_email(self, to: str, subject: str, body: str) -> str:
-        """Send a plain-text email. Returns the Gmail message id."""
-        return self.send_email_with_attachments(to, subject, body, attachments=[])
-
-    def send_email_with_attachments(
-        self,
+    @staticmethod
+    def _build_raw_message(
         to: str,
         subject: str,
         body: str,
         attachments: list[str],
-        body_html: str | None = None,
+        body_html: str | None,
     ) -> str:
-        """Send an email with zero or more file attachments. Returns the Gmail message id.
+        """Build a base64url-encoded RFC 5322 message.
 
         ``body`` is the plain-text fallback. If ``body_html`` is provided, the
-        message is sent as ``multipart/alternative`` so HTML-capable clients
+        message is built as ``multipart/alternative`` so HTML-capable clients
         render the rich version while others fall back to plain text.
         """
         message = MIMEMultipart()
@@ -138,7 +137,22 @@ class GmailService:
             part.add_header("Content-Disposition", "attachment", filename=path.name)
             message.attach(part)
 
-        raw = base64.urlsafe_b64encode(message.as_bytes()).decode()
+        return base64.urlsafe_b64encode(message.as_bytes()).decode()
+
+    def send_email(self, to: str, subject: str, body: str) -> str:
+        """Send a plain-text email. Returns the Gmail message id."""
+        return self.send_email_with_attachments(to, subject, body, attachments=[])
+
+    def send_email_with_attachments(
+        self,
+        to: str,
+        subject: str,
+        body: str,
+        attachments: list[str],
+        body_html: str | None = None,
+    ) -> str:
+        """Send an email with zero or more file attachments. Returns the Gmail message id."""
+        raw = self._build_raw_message(to, subject, body, attachments, body_html)
 
         try:
             sent = (
@@ -155,3 +169,30 @@ class GmailService:
             raise GmailServiceError(str(exc)) from exc
 
         return sent["id"]
+
+    def create_draft_with_attachments(
+        self,
+        to: str,
+        subject: str,
+        body: str,
+        attachments: list[str],
+        body_html: str | None = None,
+    ) -> str:
+        """Create a Gmail draft (not sent). Returns the draft id."""
+        raw = self._build_raw_message(to, subject, body, attachments, body_html)
+
+        try:
+            draft = (
+                self._get_service()
+                .users()
+                .drafts()
+                .create(userId="me", body={"message": {"raw": raw}})
+                .execute()
+            )
+        except GmailServiceError:
+            raise
+        except (HttpError, GoogleAuthError, OSError) as exc:
+            logger.error("Gmail draft creation failed for %s: %s", to, exc)
+            raise GmailServiceError(str(exc)) from exc
+
+        return draft["id"]

@@ -60,36 +60,42 @@ class MainWindow(QMainWindow):
         self.stack.addWidget(logs_view)
         self.stack.setCurrentWidget(logs_view)
 
-    def start_send(self, campaign: Campaign, recipients: list[Recipient]) -> None:
-        progress_screen = CampaignProgress()
+    def start_send(self, campaign: Campaign, recipients: list[Recipient], mode: str = "send") -> None:
+        progress_screen = CampaignProgress(mode=mode)
         self.stack.addWidget(progress_screen)
         self.stack.setCurrentWidget(progress_screen)
         self._active_progress_screen = progress_screen
 
-        worker = SendWorker(self.sender, campaign, recipients)
+        worker = SendWorker(self.sender, campaign, recipients, mode=mode)
         worker.progress.connect(progress_screen.update_progress)
-        worker.finished_sending.connect(lambda result: self._on_send_finished(campaign, result))
-        worker.failed.connect(lambda message: self._on_send_failed(campaign, message))
+        worker.finished_sending.connect(lambda result: self._on_send_finished(campaign, result, mode))
+        worker.failed.connect(lambda message: self._on_send_failed(campaign, message, mode))
         self._active_worker = worker
         worker.start()
 
-    def _on_send_finished(self, campaign: Campaign, result) -> None:
-        status = CampaignStatus.COMPLETED if result.failed == 0 else CampaignStatus.FAILED
+    def _on_send_finished(self, campaign: Campaign, result, mode: str) -> None:
+        if mode == "send":
+            status = CampaignStatus.COMPLETED if result.failed == 0 else CampaignStatus.FAILED
+            label = "Sent"
+        else:
+            status = CampaignStatus.DRAFTS_CREATED if result.failed == 0 else CampaignStatus.FAILED
+            label = "Drafted"
         self.manager.set_status(campaign, status)
         self.dashboard.refresh()
         self._active_worker = None
         QMessageBox.information(
             self,
             "Campaign finished",
-            f"Sent: {result.sent}, Failed: {result.failed}",
+            f"{label}: {result.sent}, Failed: {result.failed}",
         )
         self.stack.setCurrentWidget(self.dashboard)
 
-    def _on_send_failed(self, campaign: Campaign, message: str) -> None:
+    def _on_send_failed(self, campaign: Campaign, message: str, mode: str) -> None:
         self.manager.set_status(campaign, CampaignStatus.FAILED)
         self.dashboard.refresh()
         self._active_worker = None
-        QMessageBox.critical(self, "Campaign send failed", message)
+        title = "Campaign send failed" if mode == "send" else "Draft creation failed"
+        QMessageBox.critical(self, title, message)
         self.stack.setCurrentWidget(self.dashboard)
 
     def _on_reauthenticate(self) -> None:

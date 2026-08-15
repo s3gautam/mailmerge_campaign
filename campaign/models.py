@@ -12,12 +12,15 @@ class CampaignStatus(str, Enum):
     SENDING = "sending"
     COMPLETED = "completed"
     FAILED = "failed"
+    DRAFTING = "drafting"
+    DRAFTS_CREATED = "drafts_created"
 
 
 class RecipientStatus(str, Enum):
     PENDING = "pending"
     SENT = "sent"
     FAILED = "failed"
+    DRAFTED = "drafted"
 
 
 @dataclass

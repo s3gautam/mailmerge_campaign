@@ -30,7 +30,7 @@ class CampaignEditor(QWidget):
         self,
         manager: CampaignManager,
         campaign: Campaign,
-        on_send: Callable[[Campaign, list[Recipient]], None],
+        on_send: Callable[[Campaign, list[Recipient], str], None],
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -54,6 +54,7 @@ class CampaignEditor(QWidget):
         self.preview_button = QPushButton("Preview")
         self.validate_button = QPushButton("Validate")
         self.send_button = QPushButton("Send")
+        self.draft_button = QPushButton("Save as Drafts")
 
         self.upload_button.clicked.connect(self._on_upload_csv)
         self.email_column_combo.currentTextChanged.connect(self._on_email_column_chosen)
@@ -62,6 +63,7 @@ class CampaignEditor(QWidget):
         self.preview_button.clicked.connect(self._on_preview)
         self.validate_button.clicked.connect(self._on_validate)
         self.send_button.clicked.connect(self._on_send)
+        self.draft_button.clicked.connect(self._on_save_drafts)
 
         for attachment in campaign.attachments:
             self.attachments_list.addItem(attachment)
@@ -83,6 +85,7 @@ class CampaignEditor(QWidget):
             self.preview_button,
             self.validate_button,
             self.send_button,
+            self.draft_button,
         ):
             layout.addWidget(widget)
 
@@ -213,9 +216,18 @@ class CampaignEditor(QWidget):
         dialog.exec()
 
     def _on_send(self) -> None:
+        self._start_operation(mode="send")
+
+    def _on_save_drafts(self) -> None:
+        self._start_operation(mode="draft")
+
+    def _start_operation(self, mode: str) -> None:
+        verb = "send" if mode == "send" else "save as drafts"
         result = self._run_validation()
         if not result.is_valid:
-            QMessageBox.warning(self, "Cannot send", "Fix validation errors first:\n" + "\n".join(result.errors))
+            QMessageBox.warning(
+                self, f"Cannot {verb}", "Fix validation errors first:\n" + "\n".join(result.errors)
+            )
             return
         if self.campaign.id is None:
             return
@@ -231,12 +243,13 @@ class CampaignEditor(QWidget):
                 self,
                 "Some recipients will be skipped",
                 f"{len(skipped)} recipient(s) have an invalid email, are duplicates, "
-                "or are missing a variable, and will be skipped. Everyone else will "
-                "still be sent to. Continue?",
+                f"or are missing a variable, and will be skipped. Everyone else will "
+                f"still be {verb} for. Continue?",
             )
             if confirm != QMessageBox.Yes:
                 return
 
         recipients = self.manager.database.list_recipients(self.campaign.id)
-        self.manager.set_status(self.campaign, CampaignStatus.SENDING)
-        self.on_send(self.campaign, recipients)
+        status = CampaignStatus.SENDING if mode == "send" else CampaignStatus.DRAFTING
+        self.manager.set_status(self.campaign, status)
+        self.on_send(self.campaign, recipients, mode)

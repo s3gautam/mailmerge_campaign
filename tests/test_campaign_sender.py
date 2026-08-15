@@ -8,12 +8,19 @@ class FakeGmailService:
     def __init__(self, fail_for: set[str] | None = None) -> None:
         self.fail_for = fail_for or set()
         self.sent: list[str] = []
+        self.drafted: list[str] = []
 
     def send_email_with_attachments(self, to, subject, body, attachments, body_html=None):
         if to in self.fail_for:
             raise GmailServiceError("simulated failure")
         self.sent.append(to)
         return "fake-message-id"
+
+    def create_draft_with_attachments(self, to, subject, body, attachments, body_html=None):
+        if to in self.fail_for:
+            raise GmailServiceError("simulated failure")
+        self.drafted.append(to)
+        return "fake-draft-id"
 
 
 def _make_campaign(db: Database) -> Campaign:
@@ -79,3 +86,29 @@ def test_send_skips_invalid_duplicate_and_missing_variable_recipients(tmp_path):
     assert "Duplicate email" in reasons["ok@example.com"]
     assert "Invalid email format" in reasons["not-an-email"]
     assert "Missing variable" in reasons["missing@example.com"]
+
+
+def test_create_drafts_records_drafted_status(tmp_path):
+    db = Database(tmp_path / "test.db")
+    campaign = _make_campaign(db)
+    recipients = [
+        Recipient(campaign_id=campaign.id, email="ok@example.com", variables={"Name": "OK"}),
+        Recipient(campaign_id=campaign.id, email="bad@example.com", variables={"Name": "Bad"}),
+    ]
+    db.add_recipients(recipients)
+    recipients = db.list_recipients(campaign.id)
+
+    gmail = FakeGmailService(fail_for={"bad@example.com"})
+    sender = CampaignSender(db, gmail)
+
+    progress = sender.create_drafts(campaign, recipients)
+
+    assert progress.sent == 1
+    assert progress.failed == 1
+    assert gmail.drafted == ["ok@example.com"]
+    assert gmail.sent == []
+
+    updated = db.list_recipients(campaign.id)
+    by_email = {r.email: r.status for r in updated}
+    assert by_email["ok@example.com"] == RecipientStatus.DRAFTED
+    assert by_email["bad@example.com"] == RecipientStatus.FAILED
