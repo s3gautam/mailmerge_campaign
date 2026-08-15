@@ -68,11 +68,16 @@ class FollowUpManager:
         date_from: date,
         date_to: date,
         keyword: str = "",
+        subject_keyword: str = "",
         reply_filter: str = "all",
         max_results: int = 50,
     ) -> list[FollowUpCandidate]:
         """Search Sent mail for a date range and classify each thread.
 
+        ``keyword`` is a comma/semicolon-separated list of companies (OR'd
+        together). ``subject_keyword`` is an exact phrase required in the
+        subject line (e.g. "Application for role of") -- ANDed with the
+        company list and date range, narrowing the results.
         ``reply_filter`` is one of "all", "replied", "not_replied".
         """
         query_parts = [
@@ -83,6 +88,9 @@ class FollowUpManager:
         keyword_clause = _build_keyword_clause(keyword)
         if keyword_clause:
             query_parts.append(keyword_clause)
+        if subject_keyword.strip():
+            escaped = subject_keyword.strip().replace('"', '\\"')
+            query_parts.append(f'subject:"{escaped}"')
 
         thread_ids = self.gmail_service.list_thread_ids(
             query=" ".join(query_parts), max_results=max_results

@@ -143,6 +143,37 @@ def test_find_candidates_builds_or_clause_for_comma_separated_companies(tmp_path
     ]
 
 
+def test_find_candidates_ands_subject_keyword_with_company_clause(tmp_path):
+    db = FollowUpDatabase(tmp_path / "test.db")
+    gmail = FakeGmailService({})
+    manager = FollowUpManager(db, gmail)
+
+    manager.find_candidates(
+        date_from=date(2024, 3, 1),
+        date_to=date(2024, 3, 5),
+        keyword="antilease, brexy",
+        subject_keyword="Application for role of",
+    )
+
+    assert gmail.queries == [
+        'in:sent after:2024/03/01 before:2024/03/06 (antilease OR brexy) subject:"Application for role of"'
+    ]
+
+
+def test_find_candidates_subject_keyword_alone(tmp_path):
+    db = FollowUpDatabase(tmp_path / "test.db")
+    gmail = FakeGmailService({})
+    manager = FollowUpManager(db, gmail)
+
+    manager.find_candidates(
+        date_from=date(2024, 3, 1), date_to=date(2024, 3, 5), subject_keyword="Application for role of"
+    )
+
+    assert gmail.queries == [
+        'in:sent after:2024/03/01 before:2024/03/06 subject:"Application for role of"'
+    ]
+
+
 def test_find_candidates_keyword_list_tolerates_semicolons_and_stray_whitespace(tmp_path):
     db = FollowUpDatabase(tmp_path / "test.db")
     gmail = FakeGmailService({})

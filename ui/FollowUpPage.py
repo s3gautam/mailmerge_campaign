@@ -53,7 +53,12 @@ class FollowUpPage(QWidget):
 
         self.keyword_input = QLineEdit()
         self.keyword_input.setPlaceholderText(
-            "Keyword(s), comma-separated (optional), e.g. antilease, brexy, seedflex"
+            "Company keyword(s), comma-separated (optional), e.g. antilease, brexy, seedflex"
+        )
+
+        self.subject_keyword_input = QLineEdit()
+        self.subject_keyword_input.setPlaceholderText(
+            'Subject contains (optional), e.g. Application for role of'
         )
 
         self.reply_filter = QComboBox()
@@ -100,11 +105,14 @@ class FollowUpPage(QWidget):
             self.from_date,
             QLabel("To"),
             self.to_date,
-            self.keyword_input,
             self.reply_filter,
             self.find_button,
         ):
             filter_row.addWidget(widget)
+
+        search_row = QHBoxLayout()
+        search_row.addWidget(self.keyword_input)
+        search_row.addWidget(self.subject_keyword_input)
 
         select_row = QHBoxLayout()
         select_row.addWidget(self.select_all_button)
@@ -117,6 +125,7 @@ class FollowUpPage(QWidget):
 
         layout = QVBoxLayout(self)
         layout.addLayout(filter_row)
+        layout.addLayout(search_row)
         layout.addWidget(self.table)
         layout.addWidget(QLabel("Selected row"))
         layout.addWidget(self.detail_view)
@@ -135,6 +144,7 @@ class FollowUpPage(QWidget):
                 date_from=date_from,
                 date_to=date_to,
                 keyword=self.keyword_input.text(),
+                subject_keyword=self.subject_keyword_input.text(),
                 reply_filter=reply_filter,
             )
         except GmailServiceError as exc:
