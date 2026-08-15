@@ -5,3 +5,6 @@ logs/
 token.json
 credentials.json
 .venv/
+build/
+dist/
+*.spec

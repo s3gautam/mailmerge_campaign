@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+from pathlib import Path
 
 from PySide6.QtWidgets import (
     QApplication,
@@ -33,18 +34,37 @@ from ui.send_worker import SendWorker
 from ui.ThreadView import ThreadView
 
 
+def get_app_dir() -> Path:
+    """Directory holding credentials.json/token.json/campaign.db/logs.
+
+    When running from source (``python main.py``) this is the repo root.
+    When packaged with PyInstaller, ``sys.frozen`` is set and the working
+    directory a double-clicked exe starts in isn't reliable (a --onefile
+    build also unpacks to a temp dir at sys._MEIPASS) — anchor to the
+    executable's own folder instead so credentials/db/logs always live
+    next to the .exe rather than vanishing into a temp directory.
+    """
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parent
+
+
 class MainWindow(QMainWindow):
-    def __init__(self) -> None:
+    def __init__(self, app_dir: Path) -> None:
         super().__init__()
         self.setWindowTitle("Gmail Campaign")
         self.resize(900, 600)
 
-        self.database = Database("campaign.db")
+        db_path = app_dir / "campaign.db"
+        self.database = Database(db_path)
         self.manager = CampaignManager(self.database)
-        self.gmail_service = GmailService()
+        self.gmail_service = GmailService(
+            credentials_path=str(app_dir / "credentials.json"),
+            token_path=str(app_dir / "token.json"),
+        )
         self.sender = CampaignSender(self.database, self.gmail_service)
         self.inbox_manager = InboxManager(self.gmail_service)
-        self.followup_database = FollowUpDatabase("campaign.db")
+        self.followup_database = FollowUpDatabase(db_path)
         self.followup_manager = FollowUpManager(self.followup_database, self.gmail_service)
 
         toolbar = QToolBar("Gmail")
@@ -183,9 +203,10 @@ class MainWindow(QMainWindow):
 
 
 def main() -> None:
-    configure_logging()
+    app_dir = get_app_dir()
+    configure_logging(log_dir=app_dir / "logs")
     app = QApplication(sys.argv)
-    window = MainWindow()
+    window = MainWindow(app_dir)
     window.show()
     sys.exit(app.exec())
 
