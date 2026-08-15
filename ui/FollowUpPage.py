@@ -63,8 +63,19 @@ class FollowUpPage(QWidget):
 
         self.table = QTableWidget(0, len(COLUMNS), self)
         self.table.setHorizontalHeaderLabels(COLUMNS)
-        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        header = self.table.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.Interactive)
+        header.setStretchLastSection(True)
+        self.table.setColumnWidth(1, 140)
+        self.table.setColumnWidth(2, 200)
+        self.table.setColumnWidth(3, 260)
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.table.itemSelectionChanged.connect(self._on_row_selected)
+
+        self.detail_view = QTextEdit()
+        self.detail_view.setReadOnly(True)
+        self.detail_view.setPlaceholderText("Select a row to see its full details here.")
+        self.detail_view.setMaximumHeight(90)
 
         self.select_all_button = QPushButton("Select All")
         self.select_none_button = QPushButton("Select None")
@@ -105,6 +116,8 @@ class FollowUpPage(QWidget):
         layout = QVBoxLayout(self)
         layout.addLayout(filter_row)
         layout.addWidget(self.table)
+        layout.addWidget(QLabel("Selected row"))
+        layout.addWidget(self.detail_view)
         layout.addLayout(select_row)
         layout.addWidget(QLabel("Follow-up message"))
         layout.addWidget(self.body_input)
@@ -145,6 +158,29 @@ class FollowUpPage(QWidget):
                 else "Never"
             )
             self.table.setItem(row, 6, QTableWidgetItem(last))
+
+    def _on_row_selected(self) -> None:
+        rows = {index.row() for index in self.table.selectedIndexes()}
+        if not rows or not self._candidates:
+            self.detail_view.clear()
+            return
+        row = min(rows)
+        if row >= len(self._candidates):
+            return
+        candidate = self._candidates[row]
+        last = (
+            candidate.last_followup_at.strftime("%Y-%m-%d")
+            if candidate.last_followup_at
+            else "Never"
+        )
+        self.detail_view.setPlainText(
+            f"Company: {candidate.company}\n"
+            f"Email: {candidate.recipient_email}\n"
+            f"Subject: {candidate.subject}\n"
+            f"Replied: {'Yes' if candidate.replied else 'No'}  |  "
+            f"Messages in thread: {candidate.message_count}  |  "
+            f"Last followed up: {last}"
+        )
 
     def _set_all_checked(self, checked: bool) -> None:
         for row in range(self.table.rowCount()):

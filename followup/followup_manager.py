@@ -94,23 +94,44 @@ class FollowUpManager:
         if not thread.messages:
             return None
 
-        my_message = next(
-            (m for m in thread.messages if _bare_address(m.sender).lower() == my_email.lower()),
-            thread.messages[0],
-        )
-        recipient_email = _bare_address(my_message.to) or my_message.to
+        my_email_lower = my_email.lower()
+
+        # Recipient: the first address anywhere in the thread that isn't me,
+        # checking each message's To then From in order. Scanning every
+        # message (not just assuming the first message's To header is
+        # populated/well-formed) makes this resilient to messages sent to
+        # multiple people, missing headers, or CC-only addressing.
+        recipient_email = ""
+        for message in thread.messages:
+            for header_value in (message.to, message.sender):
+                addr = _bare_address(header_value)
+                if addr and addr.lower() != my_email_lower:
+                    recipient_email = addr
+                    break
+            if recipient_email:
+                break
+
+        if not recipient_email:
+            return None
+
+        # Subject: prefer the thread-level subject, but fall back to
+        # scanning every message in case the first one's header was blank.
+        subject = thread.subject.strip() if thread.subject else ""
+        if not subject:
+            subject = next((m.subject.strip() for m in thread.messages if m.subject.strip()), "")
+        subject = subject or "(no subject)"
 
         last_message = thread.messages[-1]
         replied = (
             len(thread.messages) > 1
-            and _bare_address(last_message.sender).lower() != my_email.lower()
+            and _bare_address(last_message.sender).lower() != my_email_lower
         )
 
         return FollowUpCandidate(
             thread_id=thread.id,
             recipient_email=recipient_email,
             company=_company_label(recipient_email),
-            subject=thread.subject,
+            subject=subject,
             message_count=len(thread.messages),
             replied=replied,
             last_message_id_header=last_message.message_id_header,

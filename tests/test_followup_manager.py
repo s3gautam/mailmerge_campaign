@@ -31,13 +31,13 @@ def _thread(thread_id, subject, messages) -> ThreadDetail:
     return ThreadDetail(id=thread_id, subject=subject, messages=messages)
 
 
-def _msg(sender, to, message_id="<m@mail>") -> Message:
+def _msg(sender, to, message_id="<m@mail>", subject="Application") -> Message:
     return Message(
         id="id",
         thread_id="t",
         sender=sender,
         to=to,
-        subject="Application",
+        subject=subject,
         date="",
         body="",
         message_id_header=message_id,
@@ -83,6 +83,40 @@ def test_find_candidates_detects_replied_vs_not_replied(tmp_path):
         date_from=date(2024, 1, 1), date_to=date(2024, 1, 31), reply_filter="not_replied"
     )
     assert [c.thread_id for c in not_replied_only] == ["not-replied"]
+
+
+def test_find_candidates_recovers_recipient_and_subject_from_later_messages(tmp_path):
+    # Mirrors a real thread where the first message's To/Subject headers
+    # weren't usable but later replies in the thread carry the info.
+    db = FollowUpDatabase(tmp_path / "test.db")
+    threads = {
+        "t1": _thread(
+            "t1",
+            "",  # thread-level subject missing
+            [
+                _msg("me@example.com", "", message_id="<first@mail>", subject=""),
+                _msg("Sankalp Shangari <sankalp@brexy.ai>", "me@example.com", message_id="<second@mail>", subject=""),
+                _msg(
+                    "Samarth Ahuja <sam@brexy.ai>",
+                    "sankalp@brexy.ai, me@example.com",
+                    message_id="<third@mail>",
+                    subject="Application for Product Manager Role at Brexy",
+                ),
+            ],
+        ),
+    }
+    gmail = FakeGmailService(threads)
+    manager = FollowUpManager(db, gmail)
+
+    candidates = manager.find_candidates(date_from=date(2024, 1, 1), date_to=date(2024, 1, 31))
+
+    assert len(candidates) == 1
+    candidate = candidates[0]
+    assert candidate.recipient_email == "sankalp@brexy.ai"
+    assert candidate.company == "Brexy"
+    assert candidate.subject == "Application for Product Manager Role at Brexy"
+    assert candidate.replied is True
+    assert candidate.message_count == 3
 
 
 def test_find_candidates_builds_gmail_search_query_with_date_range_and_keyword(tmp_path):
