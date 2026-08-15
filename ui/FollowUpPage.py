@@ -52,7 +52,9 @@ class FollowUpPage(QWidget):
         self.to_date.setCalendarPopup(True)
 
         self.keyword_input = QLineEdit()
-        self.keyword_input.setPlaceholderText('Keyword (optional), e.g. "product manager"')
+        self.keyword_input.setPlaceholderText(
+            "Keyword(s), comma-separated (optional), e.g. antilease, brexy, seedflex"
+        )
 
         self.reply_filter = QComboBox()
         self.reply_filter.addItems(list(REPLY_FILTER_VALUES.keys()))

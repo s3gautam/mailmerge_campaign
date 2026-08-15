@@ -129,6 +129,34 @@ def test_find_candidates_builds_gmail_search_query_with_date_range_and_keyword(t
     assert gmail.queries == ["in:sent after:2024/03/01 before:2024/03/06 product manager"]
 
 
+def test_find_candidates_builds_or_clause_for_comma_separated_companies(tmp_path):
+    db = FollowUpDatabase(tmp_path / "test.db")
+    gmail = FakeGmailService({})
+    manager = FollowUpManager(db, gmail)
+
+    manager.find_candidates(
+        date_from=date(2024, 3, 1), date_to=date(2024, 3, 5), keyword="antilease, brexy, seedflex"
+    )
+
+    assert gmail.queries == [
+        "in:sent after:2024/03/01 before:2024/03/06 (antilease OR brexy OR seedflex)"
+    ]
+
+
+def test_find_candidates_keyword_list_tolerates_semicolons_and_stray_whitespace(tmp_path):
+    db = FollowUpDatabase(tmp_path / "test.db")
+    gmail = FakeGmailService({})
+    manager = FollowUpManager(db, gmail)
+
+    manager.find_candidates(
+        date_from=date(2024, 3, 1), date_to=date(2024, 3, 5), keyword=" antilease ;brexy,  seedflex "
+    )
+
+    assert gmail.queries == [
+        "in:sent after:2024/03/01 before:2024/03/06 (antilease OR brexy OR seedflex)"
+    ]
+
+
 def test_send_followups_records_success_and_failure(tmp_path):
     db = FollowUpDatabase(tmp_path / "test.db")
     threads = {

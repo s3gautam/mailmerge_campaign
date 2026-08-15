@@ -28,6 +28,21 @@ def _company_label(email: str) -> str:
     return " ".join(w.capitalize() for w in words) or domain
 
 
+def _build_keyword_clause(keyword: str) -> str:
+    """Turn a comma/semicolon-separated keyword list into a Gmail OR clause.
+
+    "antilease, brexy, seedflex" -> "(antilease OR brexy OR seedflex)" so a
+    thread matching any one of the companies is found. A single term is
+    passed through unwrapped.
+    """
+    terms = [term.strip() for term in re.split(r"[,;]", keyword) if term.strip()]
+    if not terms:
+        return ""
+    if len(terms) == 1:
+        return terms[0]
+    return "(" + " OR ".join(terms) + ")"
+
+
 @dataclass
 class FollowUpProgress:
     total: int
@@ -65,8 +80,9 @@ class FollowUpManager:
             f"after:{date_from.strftime('%Y/%m/%d')}",
             f"before:{(date_to + timedelta(days=1)).strftime('%Y/%m/%d')}",
         ]
-        if keyword.strip():
-            query_parts.append(keyword.strip())
+        keyword_clause = _build_keyword_clause(keyword)
+        if keyword_clause:
+            query_parts.append(keyword_clause)
 
         thread_ids = self.gmail_service.list_thread_ids(
             query=" ".join(query_parts), max_results=max_results
