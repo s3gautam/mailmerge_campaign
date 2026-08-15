@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QMessageBox,
+    QProgressBar,
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
@@ -26,7 +27,7 @@ from PySide6.QtWidgets import (
 )
 
 from followup.followup_manager import FollowUpCandidate, FollowUpManager
-from services.gmail_service import GmailServiceError
+from ui.followup_worker import FindCandidatesWorker
 
 COLUMNS = ["Include", "Company", "Email", "Subject", "Replied", "Messages", "Last followed up"]
 
@@ -44,6 +45,7 @@ class FollowUpPage(QWidget):
         self.manager = manager
         self.on_send = on_send
         self._candidates: list[FollowUpCandidate] = []
+        self._search_worker: FindCandidatesWorker | None = None
 
         today = QDate.currentDate()
         self.from_date = QDateEdit(today.addMonths(-1))
@@ -67,6 +69,12 @@ class FollowUpPage(QWidget):
 
         self.find_button = QPushButton("Find Candidates")
         self.find_button.clicked.connect(self._on_find)
+
+        self.search_status_label = QLabel("")
+        self.search_progress = QProgressBar()
+        self.search_progress.setRange(0, 0)  # indeterminate — we don't know result count up front
+        self.search_progress.setVisible(False)
+        self.search_status_label.setVisible(False)
 
         self.table = QTableWidget(0, len(COLUMNS), self)
         self.table.setHorizontalHeaderLabels(COLUMNS)
@@ -126,6 +134,8 @@ class FollowUpPage(QWidget):
         layout = QVBoxLayout(self)
         layout.addLayout(filter_row)
         layout.addLayout(search_row)
+        layout.addWidget(self.search_status_label)
+        layout.addWidget(self.search_progress)
         layout.addWidget(self.table)
         layout.addWidget(QLabel("Selected row"))
         layout.addWidget(self.detail_view)
@@ -135,23 +145,45 @@ class FollowUpPage(QWidget):
         layout.addLayout(footer_row)
 
     def _on_find(self) -> None:
+        if self._search_worker is not None:
+            return  # a search is already running
+
         date_from = self.from_date.date().toPython()
         date_to = self.to_date.date().toPython()
         reply_filter = REPLY_FILTER_VALUES[self.reply_filter.currentText()]
 
-        try:
-            self._candidates = self.manager.find_candidates(
-                date_from=date_from,
-                date_to=date_to,
-                keyword=self.keyword_input.text(),
-                subject_keyword=self.subject_keyword_input.text(),
-                reply_filter=reply_filter,
-            )
-        except GmailServiceError as exc:
-            QMessageBox.critical(self, "Could not search mail", str(exc))
-            return
+        self._set_searching(True)
 
+        worker = FindCandidatesWorker(
+            self.manager,
+            date_from,
+            date_to,
+            self.keyword_input.text(),
+            self.subject_keyword_input.text(),
+            reply_filter,
+        )
+        worker.finished_search.connect(self._on_search_finished)
+        worker.failed.connect(self._on_search_failed)
+        self._search_worker = worker
+        worker.start()
+
+    def _set_searching(self, searching: bool) -> None:
+        self.find_button.setEnabled(not searching)
+        self.find_button.setText("Searching..." if searching else "Find Candidates")
+        self.search_progress.setVisible(searching)
+        self.search_status_label.setVisible(searching)
+        self.search_status_label.setText("Searching Gmail — this can take a moment..." if searching else "")
+
+    def _on_search_finished(self, candidates: list[FollowUpCandidate]) -> None:
+        self._search_worker = None
+        self._set_searching(False)
+        self._candidates = candidates
         self._render_table()
+
+    def _on_search_failed(self, message: str) -> None:
+        self._search_worker = None
+        self._set_searching(False)
+        QMessageBox.critical(self, "Could not search mail", message)
 
     def _render_table(self) -> None:
         self.table.setRowCount(len(self._candidates))
