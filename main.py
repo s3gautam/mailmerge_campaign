@@ -4,19 +4,29 @@ from __future__ import annotations
 
 import sys
 
-from PySide6.QtWidgets import QApplication, QMainWindow, QMessageBox, QStackedWidget, QToolBar
+from PySide6.QtWidgets import (
+    QApplication,
+    QMainWindow,
+    QMessageBox,
+    QStackedWidget,
+    QTabWidget,
+    QToolBar,
+)
 
 from campaign.campaign_manager import CampaignManager
 from campaign.campaign_sender import CampaignSender
 from campaign.database import Database
 from campaign.logging_config import configure_logging
 from campaign.models import Campaign, CampaignStatus, Recipient
+from inbox.inbox_manager import InboxManager
 from services.gmail_service import GmailService, GmailServiceError
 from ui.CampaignEditor import CampaignEditor
 from ui.CampaignLogs import CampaignLogs
 from ui.CampaignPage import CampaignPage
 from ui.CampaignProgress import CampaignProgress
+from ui.InboxPage import InboxPage
 from ui.send_worker import SendWorker
+from ui.ThreadView import ThreadView
 
 
 class MainWindow(QMainWindow):
@@ -29,13 +39,20 @@ class MainWindow(QMainWindow):
         self.manager = CampaignManager(self.database)
         self.gmail_service = GmailService()
         self.sender = CampaignSender(self.database, self.gmail_service)
+        self.inbox_manager = InboxManager(self.gmail_service)
 
         toolbar = QToolBar("Gmail")
         toolbar.addAction("Reauthenticate Gmail", self._on_reauthenticate)
         self.addToolBar(toolbar)
 
+        tabs = QTabWidget()
+        self.setCentralWidget(tabs)
+
         self.stack = QStackedWidget()
-        self.setCentralWidget(self.stack)
+        tabs.addTab(self.stack, "Campaign")
+
+        self.inbox_stack = QStackedWidget()
+        tabs.addTab(self.inbox_stack, "Inbox")
 
         self.dashboard = CampaignPage(
             self.manager,
@@ -44,6 +61,10 @@ class MainWindow(QMainWindow):
         )
         self.stack.addWidget(self.dashboard)
         self.stack.setCurrentWidget(self.dashboard)
+
+        self.inbox_page = InboxPage(self.inbox_manager, on_open_thread=self.open_thread)
+        self.inbox_stack.addWidget(self.inbox_page)
+        self.inbox_stack.setCurrentWidget(self.inbox_page)
 
         self._active_worker: SendWorker | None = None
         self._active_progress_screen: CampaignProgress | None = None
@@ -59,6 +80,14 @@ class MainWindow(QMainWindow):
         logs_view = CampaignLogs(self.database, campaign.id)
         self.stack.addWidget(logs_view)
         self.stack.setCurrentWidget(logs_view)
+
+    def open_thread(self, thread_id: str) -> None:
+        thread_view = ThreadView(self.inbox_manager, thread_id, on_back=self._back_to_inbox)
+        self.inbox_stack.addWidget(thread_view)
+        self.inbox_stack.setCurrentWidget(thread_view)
+
+    def _back_to_inbox(self) -> None:
+        self.inbox_stack.setCurrentWidget(self.inbox_page)
 
     def start_send(self, campaign: Campaign, recipients: list[Recipient], mode: str = "send") -> None:
         progress_screen = CampaignProgress(mode=mode)

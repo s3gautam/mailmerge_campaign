@@ -1,7 +1,7 @@
 """Centralized Gmail API access.
 
-Every module that needs to send mail must go through this service. No other
-module should import ``googleapiclient`` or perform OAuth directly.
+Every module that needs to talk to Gmail must go through this service. No
+other module should import ``googleapiclient`` or perform OAuth directly.
 """
 
 from __future__ import annotations
@@ -10,6 +10,7 @@ import base64
 import logging
 import mimetypes
 import os
+from dataclasses import dataclass, field
 from email.mime.application import MIMEApplication
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -24,14 +25,47 @@ from googleapiclient.errors import HttpError
 
 logger = logging.getLogger("gmail_service")
 
-# gmail.compose covers both sending and draft management (a superset of
-# gmail.send), so a single scope supports send_email_with_attachments() and
-# create_draft_with_attachments().
-SCOPES = ["https://www.googleapis.com/auth/gmail.compose"]
+# gmail.modify covers reading, composing, sending, and draft management in
+# one scope, so it supports every method on this service.
+SCOPES = ["https://www.googleapis.com/auth/gmail.modify"]
 
 
 class GmailServiceError(Exception):
-    """Raised when a Gmail send operation fails."""
+    """Raised when a Gmail operation fails."""
+
+
+@dataclass
+class ThreadSummary:
+    """One row in an inbox thread listing."""
+
+    id: str
+    subject: str
+    sender: str
+    date: str
+    snippet: str
+
+
+@dataclass
+class Message:
+    """A single message within a thread."""
+
+    id: str
+    thread_id: str
+    sender: str
+    to: str
+    subject: str
+    date: str
+    body: str
+    message_id_header: str = ""
+
+
+@dataclass
+class ThreadDetail:
+    """A full thread with all of its messages, oldest first."""
+
+    id: str
+    subject: str
+    messages: list[Message] = field(default_factory=list)
 
 
 def _sanitize_header(value: str) -> str:
@@ -196,3 +230,126 @@ class GmailService:
             raise GmailServiceError(str(exc)) from exc
 
         return draft["id"]
+
+    def list_threads(self, query: str = "", max_results: int = 20) -> list[ThreadSummary]:
+        """List inbox threads, most recent first, as lightweight summaries."""
+        try:
+            response = (
+                self._get_service()
+                .users()
+                .threads()
+                .list(userId="me", q=query, maxResults=max_results)
+                .execute()
+            )
+        except (HttpError, GoogleAuthError, OSError) as exc:
+            logger.error("Gmail thread listing failed: %s", exc)
+            raise GmailServiceError(str(exc)) from exc
+
+        summaries = []
+        for thread_ref in response.get("threads", []):
+            summaries.append(self._get_thread_summary(thread_ref["id"]))
+        return summaries
+
+    def _get_thread_summary(self, thread_id: str) -> ThreadSummary:
+        try:
+            thread = (
+                self._get_service()
+                .users()
+                .threads()
+                .get(
+                    userId="me",
+                    id=thread_id,
+                    format="metadata",
+                    metadataHeaders=["Subject", "From", "Date"],
+                )
+                .execute()
+            )
+        except (HttpError, GoogleAuthError, OSError) as exc:
+            logger.error("Gmail thread metadata fetch failed for %s: %s", thread_id, exc)
+            raise GmailServiceError(str(exc)) from exc
+
+        last_message = thread["messages"][-1]
+        headers = {h["name"]: h["value"] for h in last_message["payload"].get("headers", [])}
+        return ThreadSummary(
+            id=thread_id,
+            subject=headers.get("Subject", "(no subject)"),
+            sender=headers.get("From", ""),
+            date=headers.get("Date", ""),
+            snippet=last_message.get("snippet", ""),
+        )
+
+    def get_thread(self, thread_id: str) -> ThreadDetail:
+        """Fetch a full thread with all messages and decoded plain-text bodies."""
+        try:
+            thread = (
+                self._get_service()
+                .users()
+                .threads()
+                .get(userId="me", id=thread_id, format="full")
+                .execute()
+            )
+        except (HttpError, GoogleAuthError, OSError) as exc:
+            logger.error("Gmail thread fetch failed for %s: %s", thread_id, exc)
+            raise GmailServiceError(str(exc)) from exc
+
+        messages = [self._parse_message(m) for m in thread.get("messages", [])]
+        subject = messages[0].subject if messages else "(no subject)"
+        return ThreadDetail(id=thread_id, subject=subject, messages=messages)
+
+    @staticmethod
+    def _parse_message(raw_message: dict) -> Message:
+        headers = {h["name"]: h["value"] for h in raw_message["payload"].get("headers", [])}
+        return Message(
+            id=raw_message["id"],
+            thread_id=raw_message["threadId"],
+            sender=headers.get("From", ""),
+            to=headers.get("To", ""),
+            subject=headers.get("Subject", "(no subject)"),
+            date=headers.get("Date", ""),
+            body=GmailService._extract_plain_text(raw_message["payload"]),
+            message_id_header=headers.get("Message-ID", headers.get("Message-Id", "")),
+        )
+
+    @staticmethod
+    def _extract_plain_text(payload: dict) -> str:
+        if payload.get("mimeType") == "text/plain" and payload.get("body", {}).get("data"):
+            return base64.urlsafe_b64decode(payload["body"]["data"]).decode("utf-8", errors="replace")
+        for part in payload.get("parts", []):
+            text = GmailService._extract_plain_text(part)
+            if text:
+                return text
+        return ""
+
+    def reply_to_thread(
+        self,
+        thread_id: str,
+        to: str,
+        subject: str,
+        body: str,
+        in_reply_to: str = "",
+    ) -> str:
+        """Send a reply within an existing thread. Returns the sent message id."""
+        message = MIMEMultipart()
+        message["to"] = _sanitize_header(to)
+        clean_subject = _sanitize_header(subject)
+        message["subject"] = clean_subject if clean_subject.lower().startswith("re:") else f"Re: {clean_subject}"
+        message.attach(MIMEText(body, "plain"))
+        if in_reply_to:
+            message["In-Reply-To"] = in_reply_to
+            message["References"] = in_reply_to
+
+        raw = base64.urlsafe_b64encode(message.as_bytes()).decode()
+
+        try:
+            sent = (
+                self._get_service()
+                .users()
+                .messages()
+                .send(userId="me", body={"raw": raw, "threadId": thread_id})
+                .execute()
+            )
+        except (HttpError, GoogleAuthError, OSError) as exc:
+            logger.error("Gmail reply failed for thread %s: %s", thread_id, exc)
+            raise GmailServiceError(str(exc)) from exc
+
+        return sent["id"]
