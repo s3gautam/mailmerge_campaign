@@ -18,12 +18,16 @@ from campaign.campaign_sender import CampaignSender
 from campaign.database import Database
 from campaign.logging_config import configure_logging
 from campaign.models import Campaign, CampaignStatus, Recipient
+from followup.database import FollowUpDatabase
+from followup.followup_manager import FollowUpCandidate, FollowUpManager
 from inbox.inbox_manager import InboxManager
 from services.gmail_service import GmailService, GmailServiceError
 from ui.CampaignEditor import CampaignEditor
 from ui.CampaignLogs import CampaignLogs
 from ui.CampaignPage import CampaignPage
 from ui.CampaignProgress import CampaignProgress
+from ui.FollowUpPage import FollowUpPage
+from ui.followup_worker import FollowUpWorker
 from ui.InboxPage import InboxPage
 from ui.send_worker import SendWorker
 from ui.ThreadView import ThreadView
@@ -40,6 +44,8 @@ class MainWindow(QMainWindow):
         self.gmail_service = GmailService()
         self.sender = CampaignSender(self.database, self.gmail_service)
         self.inbox_manager = InboxManager(self.gmail_service)
+        self.followup_database = FollowUpDatabase("campaign.db")
+        self.followup_manager = FollowUpManager(self.followup_database, self.gmail_service)
 
         toolbar = QToolBar("Gmail")
         toolbar.addAction("Reauthenticate Gmail", self._on_reauthenticate)
@@ -54,6 +60,9 @@ class MainWindow(QMainWindow):
         self.inbox_stack = QStackedWidget()
         tabs.addTab(self.inbox_stack, "Inbox")
 
+        self.followup_stack = QStackedWidget()
+        tabs.addTab(self.followup_stack, "Follow Up")
+
         self.dashboard = CampaignPage(
             self.manager,
             on_open_campaign=self.open_campaign,
@@ -66,7 +75,11 @@ class MainWindow(QMainWindow):
         self.inbox_stack.addWidget(self.inbox_page)
         self.inbox_stack.setCurrentWidget(self.inbox_page)
 
-        self._active_worker: SendWorker | None = None
+        self.followup_page = FollowUpPage(self.followup_manager, on_send=self.start_followups)
+        self.followup_stack.addWidget(self.followup_page)
+        self.followup_stack.setCurrentWidget(self.followup_page)
+
+        self._active_worker: SendWorker | FollowUpWorker | None = None
         self._active_progress_screen: CampaignProgress | None = None
 
     def open_campaign(self, campaign: Campaign) -> None:
@@ -126,6 +139,33 @@ class MainWindow(QMainWindow):
         title = "Campaign send failed" if mode == "send" else "Draft creation failed"
         QMessageBox.critical(self, title, message)
         self.stack.setCurrentWidget(self.dashboard)
+
+    def start_followups(self, candidates: list[FollowUpCandidate], body: str) -> None:
+        progress_screen = CampaignProgress(mode="followup")
+        self.followup_stack.addWidget(progress_screen)
+        self.followup_stack.setCurrentWidget(progress_screen)
+        self._active_progress_screen = progress_screen
+
+        worker = FollowUpWorker(self.followup_manager, candidates, body)
+        worker.progress.connect(progress_screen.update_progress)
+        worker.finished_sending.connect(self._on_followups_finished)
+        worker.failed.connect(self._on_followups_failed)
+        self._active_worker = worker
+        worker.start()
+
+    def _on_followups_finished(self, result) -> None:
+        self._active_worker = None
+        QMessageBox.information(
+            self,
+            "Follow-ups finished",
+            f"Followed up: {result.sent}, Failed: {result.failed}",
+        )
+        self.followup_stack.setCurrentWidget(self.followup_page)
+
+    def _on_followups_failed(self, message: str) -> None:
+        self._active_worker = None
+        QMessageBox.critical(self, "Follow-up send failed", message)
+        self.followup_stack.setCurrentWidget(self.followup_page)
 
     def _on_reauthenticate(self) -> None:
         QMessageBox.information(

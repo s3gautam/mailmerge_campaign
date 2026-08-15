@@ -89,6 +89,7 @@ class GmailService:
         self.credentials_path = credentials_path
         self.token_path = token_path
         self._service = None
+        self._profile_email: str | None = None
 
     def _get_credentials(self) -> Credentials:
         creds: Credentials | None = None
@@ -351,5 +352,36 @@ class GmailService:
         except (HttpError, GoogleAuthError, OSError) as exc:
             logger.error("Gmail reply failed for thread %s: %s", thread_id, exc)
             raise GmailServiceError(str(exc)) from exc
+
+        return sent["id"]
+
+    def get_profile_email(self) -> str:
+        """Return the authenticated account's email address (cached)."""
+        if self._profile_email is None:
+            try:
+                profile = self._get_service().users().getProfile(userId="me").execute()
+            except GmailServiceError:
+                raise
+            except (HttpError, GoogleAuthError, OSError) as exc:
+                logger.error("Gmail profile fetch failed: %s", exc)
+                raise GmailServiceError(str(exc)) from exc
+            self._profile_email = profile["emailAddress"]
+        return self._profile_email
+
+    def list_thread_ids(self, query: str, max_results: int = 50) -> list[str]:
+        """List thread ids matching a Gmail search query (e.g. 'in:sent after:2024/01/01')."""
+        try:
+            response = (
+                self._get_service()
+                .users()
+                .threads()
+                .list(userId="me", q=query, maxResults=max_results)
+                .execute()
+            )
+        except (HttpError, GoogleAuthError, OSError) as exc:
+            logger.error("Gmail thread search failed for query %r: %s", query, exc)
+            raise GmailServiceError(str(exc)) from exc
+
+        return [thread["id"] for thread in response.get("threads", [])]
 
         return sent["id"]
